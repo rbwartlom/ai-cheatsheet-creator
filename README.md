@@ -1,10 +1,10 @@
 # Cheatsheet creator project
 This is a fairly simple cheatsheet creator which can parse the most important information from a (long) lecture handout using an LLM. The generated markdown has LaTeX formulas embedded in `$`s (compatible with the vscode viewer)
 
-The processing is done asynchronously using batches of pages (the batch size can be configured through `main.py`). This slightly favors execution speed over quality, since the llm is not passed context what was on the previous page.   
+The processing is done asynchronously using batches of pages (the batch size can be configured through `main.py`). This slightly favors execution speed over quality, since the llm is not passed context what was on the previous batch of pages.   
 
 
-### Creating a venv and running the project:
+## Setup
 cd into the root directory, then
 ```bash
 touch prompts.json .env # create config files
@@ -18,10 +18,7 @@ source .venv/bin/activate # set venv as source
 ```bash
 pip install -r requirements.txt # install requirements
 ```
-Before running the script, please configure the required files (see below)
-```bash
-python3 ./main.py # run the script
-```
+Before running the script, please configure the required files:
 
 ### Environment Variables (`.env`)
 - `OPENAI_API_KEY`: The API key from your openai account. ([link](https://platform.openai.com/api-keys))
@@ -38,3 +35,7 @@ To write good prompts, note the context in which they are used:
 By default, the input file is `file.pdf`, and the result is outputted into `results/file.md`.
 If you wish to change this, you can adjust the top 2 lines from main.py
 
+### Running the program
+```bash
+python3 ./main.py
+```
