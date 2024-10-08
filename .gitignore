@@ -5,3 +5,6 @@ __pycache__
 *.md
 !README.md
 .idea
+.mypy_cache
+prompts.json
+.DS_Store

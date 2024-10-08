@@ -1,15 +1,16 @@
 import asyncio
-
 import os
-import PyPDF2
+from typing import List
 
+import PyPDF2
 from llms import process_pages
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
+# adjust this if needed
+PDF_SRC = 'file.pdf'
+MD_DESTINATION = 'file.md'
 
-PDF_SRC = 'solution (1).pdf'
-MD_DESTINATION = 'result.md'
-BATCH_SIZE = 5
+script_dir = os.path.dirname(os.path.abspath(__file__))
+BATCH_SIZE = 10
 
 
 def extract_text_from_pdf(extractor_pdf_path: str):
@@ -19,27 +20,20 @@ def extract_text_from_pdf(extractor_pdf_path: str):
 
     # Open the PDF file
     with open(extractor_pdf_path, 'rb') as pdf_file:
-        # Create a PDF reader object
         pdf_reader = PyPDF2.PdfReader(pdf_file)
 
-        # Initialize an array to hold text from each page
-        pages_text = []
+        pages_text: List[str] = []
 
-        # Loop through each page in the PDF
         for page_num in range(len(pdf_reader.pages)):
-            # Extract text from the current page
             page = pdf_reader.pages[page_num]
             page_text = page.extract_text()
-
-            # Append the extracted text to the array
             pages_text.append(page_text)
 
         return pages_text
 
 
-async def main(file_path):
-    # Extract text from the PDF
-    text_from_pages: list[str] = extract_text_from_pdf(extractor_pdf_path=file_path)
+async def extract(file_src_path: str, resultfile_name: str):
+    text_from_pages: list[str] = extract_text_from_pdf(extractor_pdf_path=file_src_path)
 
     promises = []
 
@@ -50,7 +44,10 @@ async def main(file_path):
 
     results = await asyncio.gather(*promises)
 
-    result_path = os.path.join(script_dir, MD_DESTINATION)
+    # output result
+    if not resultfile_name.endswith(".md"):
+        resultfile_name = resultfile_name + ".md"
+    result_path = os.path.join(script_dir, resultfile_name)
 
     with open(result_path, "w") as file:
         file.write("\n\n".join(results))
@@ -59,5 +56,11 @@ async def main(file_path):
 
 
 if __name__ == "__main__":
-    abs_path = os.path.join(script_dir, PDF_SRC)
-    asyncio.run(main(abs_path))
+    src_path = os.path.join(script_dir, PDF_SRC)
+    result_folder = os.path.join(script_dir, "./results/")
+    if not os.path.exists(result_folder):
+        os.mkdir(result_folder)
+    destination_path = os.path.join(result_folder, f"{MD_DESTINATION}")
+    if os.path.exists(destination_path):
+        raise Exception("File already exists, please delete before overwriting")
+    asyncio.run(extract(src_path, destination_path))

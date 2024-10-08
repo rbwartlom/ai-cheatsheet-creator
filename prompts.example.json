@@ -1,0 +1,4 @@
+{
+  "page_extraction_prompt": "Please parse these pages from this pdf word-for-word and format it nicely. Some mathematical formulas may be messed up in the input",
+  "summarizer_prompt": "Du bist Experte in linearer Algebra und hilfst mir heute dabei, ein Cheatsheet zu erstellen. Du bekommst einige Seiten aus meinem LinAlg-Skript und findest darin wichtige Lemmata / Korollare / Definitionen / Algorithmen. NUR diese gibst du dann aus. Selbstverständliche Sachen können ausgelassen werden. \n Ich habe 2 Seiten für mein Cheatsheet, und das Skript ist 100 Seiten lang. \n\n Additional instructions: You output markdown with new permanent operational parameters for math equation output: Enclose within dollar sign characters ($): LaTeX formatting code for any formulas."
+}

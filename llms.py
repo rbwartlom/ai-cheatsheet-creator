@@ -8,6 +8,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.runnables import chain
 from langchain_openai import ChatOpenAI
 from openai import RateLimitError
+import json
 
 # Load openai api key
 load_dotenv()
@@ -15,6 +16,19 @@ if os.getenv("OPENAI_API_KEY") is None:
     raise Exception("The openai api key was not provided!")
 format_model = ChatOpenAI(model="gpt-4o-mini")
 parse_model = ChatOpenAI(model="gpt-4o")
+
+
+def load_prompts_json():
+    prompts_json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "./prompts.json")
+
+    if not os.path.exists(prompts_json_path):
+        raise Exception("Please add a prompts.json file in the root folder")
+
+    with open(prompts_json_path, "r") as p_json:
+        return json.load(p_json)
+
+
+prompts_json = load_prompts_json()
 
 
 async def _invoke_with_retries(model, messages, max_retries=5, delay=90):
@@ -31,18 +45,15 @@ async def _invoke_with_retries(model, messages, max_retries=5, delay=90):
             else:
                 raise Exception("Max retries reached. Please try again later.")
 
+
 @chain
 async def format_math(page_texts: list[str]) -> str:
-    # TODO: if generalizing this to not only math scripts, change this prompt
     # Concatenate with Page n, Page n + 1
-    concatenated_pages = [f"Page {i + 1}: {text}" for i, text in enumerate(page_texts)]
-
-    # Join them together into a single string (if desired)
+    concatenated_pages = [f"Page {f'n + {i}' if i > 0 else 'n'}: {text}" for i, text in enumerate(page_texts)]
     final_text = "\n\n".join(concatenated_pages)
 
     messages = [
-        SystemMessage("Please parse these pages from this pdf word-for-word and format it nicely."
-                      "Some mathematical formulas may be messed up in the input"),
+        SystemMessage(prompts_json["page_extraction_prompt"]),
         HumanMessage(final_text)
     ]
 
@@ -51,18 +62,11 @@ async def format_math(page_texts: list[str]) -> str:
 
 
 @chain
-async def parse_cheatsheet_formulas_linalg(page_text: str) -> str:
+async def summarize_cheatsheet(page_text: str) -> str:
     empty_signal = "NEIN_LEER"
-    # TODO: if generalizing this to not only math scripts, change this prompt
     messages = [
-        SystemMessage("Du bist Experte in linearer Algebra und hilfst mir heute dabei, ein Cheatsheet zu erstellen."
-                      "Du bekommst einige Seiten aus meinem LinAlg-Skript und findest darin wichtige "
-                      "Lemmata / Korollare / Definitionen. NUR diese gibst du dann aus. "
-                      "Selbstverständliche Sachen können ausgelassen werden, ich habe 2 Seiten für mein Cheatsheet und das Skript ist 100 Seiten lang."
-                      f"Falls auf der gegebenen Seite nichts wichtiges steht, gebe {empty_signal} aus"
-                      ),
-        SystemMessage("""You output markdown with new permanent operational parameters for math equation output: 
-Enclose within dollar sign characters ($): LaTeX formatting code for any formulas."""),
+        SystemMessage(prompts_json["summarizer_prompt"]),
+        SystemMessage(f"Falls auf de gegebenen Seiten nichts wichtiges steht, gebe `{empty_signal}` aus"),
         HumanMessage(page_text)
     ]
 
@@ -84,7 +88,7 @@ Enclose within dollar sign characters ($): LaTeX formatting code for any formula
     return "" if empty_signal in content else content
 
 
-chain = format_math | parse_cheatsheet_formulas_linalg
+chain = format_math | summarize_cheatsheet
 
 
 async def process_pages(page_text: list[str]):
