@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import re
 from typing import TypedDict
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_core.runnables import chain
 from langchain_openai import ChatOpenAI
 from openai import RateLimitError
@@ -18,8 +18,8 @@ class Status(TypedDict):
 load_dotenv()
 if os.getenv("OPENAI_API_KEY") is None:
     raise Exception("The openai api key was not provided!")
-format_model = ChatOpenAI(model="gpt-4o-mini")
-parse_model = ChatOpenAI(model="gpt-4o")
+smart_model = ChatOpenAI(model="gpt-4o-mini")
+cheap_model = ChatOpenAI(model="gpt-4o")
 
 
 def load_prompts_json():
@@ -33,6 +33,15 @@ def load_prompts_json():
 
 
 prompts_json = load_prompts_json()
+
+async def get_suitable_title() -> str:
+    messages = [
+        SystemMessage("The user will provide a prompt, in which they are looking to create some sort of document. Please output a suitable title for this document. You reply with only the title"),
+        HumanMessage(prompts_json["summarizer_prompt"])
+    ]
+
+    response = await smart_model.ainvoke(messages)
+    return response.content
 
 
 
@@ -68,22 +77,29 @@ async def process_pages(page_text: list[str], status: Status):
         
         status["status"] = "formatting math"
 
-        response = await _invoke_with_retries(format_model, messages)
+        response = await _invoke_with_retries(smart_model, messages)
         return str(response.content)
 
 
     @chain
     async def summarize_cheatsheet(page_text: str) -> str:
         empty_signal = "NEIN_LEER"
+        additional_prompt = f"""
+Additional instructions: 
+- If the provided pages are not relevant (e.g. contain only metadata), return `{empty_signal}`.
+- You output markdown
+    - The markdown should not contain h1 headers since it going to be part of a larger document.
+    - In your markdown, if you output LaTeX, then follow these new permanent operational parameters for math equation output: Enclose within dollar sign characters ($) for inline math and double dollar sign characters ($$) for block math.
+"""
         messages = [
             SystemMessage(prompts_json["summarizer_prompt"]),
-            SystemMessage(f"Falls auf de gegebenen Seiten nichts wichtiges steht, gebe `{empty_signal}` aus"),
+            SystemMessage(additional_prompt),
             HumanMessage(page_text)
         ]
         
         status["status"] = "summarizing"
 
-        response = await _invoke_with_retries(parse_model, messages)
+        response = await _invoke_with_retries(cheap_model, messages)
 
         content = response.content
         if not isinstance(content, str):

@@ -1,9 +1,9 @@
 import asyncio
 import os
-from typing import List
+from typing import List, Tuple, Any, Dict
 
 import PyPDF2
-from llms import process_pages
+from llms import process_pages, get_suitable_title, Status
 import sys
 
 # adjust this if needed
@@ -31,9 +31,24 @@ def extract_text_from_pdf(extractor_pdf_path: str):
             pages_text.append(page_text)
 
         return pages_text
-    
+
+
 def move_cursor_up(n):
     sys.stdout.write(f'\033[{n}A')
+
+
+def print_status(statuses: list[tuple[Any, Status]]):
+    statuses = [f"Batch {i}: {status_dict['status']}" for i, (_, status_dict) in enumerate(statuses)]
+    terminal_width = os.get_terminal_size().columns
+    padded_statuses = [status.ljust(terminal_width) for status in statuses]
+    sys.stdout.write("\n".join(padded_statuses))
+    sys.stdout.flush()
+    move_cursor_up(len(statuses) - 1) # move cursor up to overwrite the statuses in the next iteration
+    sys.stdout.write("\r")
+
+
+def join_results(title, results):
+    return f"# {title}\n\n" + "\n\n".join(results)
 
 
 async def extract(file_src_path: str, resultfile_name: str):
@@ -42,6 +57,7 @@ async def extract(file_src_path: str, resultfile_name: str):
     print(f"Extracted {len(text_from_pages)} pages from the PDF file.")
 
     promises = []
+    title_promise = asyncio.create_task(get_suitable_title())
 
     # Process in batches of size `batch_size`
     for i in range(0, len(text_from_pages), BATCH_SIZE):
@@ -51,25 +67,23 @@ async def extract(file_src_path: str, resultfile_name: str):
 
     results = []
     for promise, status_dict in promises:
-        statuses = [f"Batch {i}: {status_dict['status']}" for i, (_, status_dict) in enumerate(promises)]
-        terminal_width = os.get_terminal_size().columns
-        padded_statuses = [status.ljust(terminal_width) for status in statuses]
-        sys.stdout.write("\n".join(padded_statuses))
-        sys.stdout.flush()
-        move_cursor_up(len(promises) - 1) # move cursor up to overwrite the statuses in the next iteration
-        sys.stdout.write("\r")
         while not promise.done():
+            print_status(promises)
             await asyncio.sleep(1)
         result = await promise
         results.append(result)
+        
+    print_status(promises)  # print the last status (all done)
 
     # output result
     if not resultfile_name.endswith(".md"):
         resultfile_name = resultfile_name + ".md"
     result_path = os.path.join(script_dir, resultfile_name)
+    
+    title = await title_promise
 
     with open(result_path, "w") as file:
-        file.write("\n\n".join(results))
+        file.write(join_results(title, results))
         print(f"Success: Results written to {result_path}")
 
     return results
