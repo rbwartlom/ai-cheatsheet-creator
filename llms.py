@@ -11,15 +11,17 @@ from langchain_openai import ChatOpenAI
 from openai import RateLimitError
 import json
 
+
 class Status(TypedDict):
     status: str
+
 
 # Load openai api key
 load_dotenv()
 if os.getenv("OPENAI_API_KEY") is None:
     raise Exception("The openai api key was not provided!")
+cheap_model = ChatOpenAI(model="gpt-4o-mini")
 smart_model = ChatOpenAI(model="gpt-4o-mini")
-cheap_model = ChatOpenAI(model="gpt-4o")
 
 
 def load_prompts_json():
@@ -44,7 +46,6 @@ async def get_suitable_title() -> str:
     return response.content
 
 
-
 async def process_pages(page_text: list[str], status: Status):
     status["status"] = "invoking"
     
@@ -63,7 +64,6 @@ async def process_pages(page_text: list[str], status: Status):
                 else:
                     raise Exception("Max retries reached. Please try again later.")
 
-
     @chain
     async def format_math(page_texts: list[str]) -> str:
         # Concatenate with Page n, Page n + 1
@@ -75,11 +75,10 @@ async def process_pages(page_text: list[str], status: Status):
             HumanMessage(final_text)
         ]
         
-        status["status"] = "formatting math"
+        status["status"] = "formatting"
 
-        response = await _invoke_with_retries(smart_model, messages)
+        response = await _invoke_with_retries(cheap_model, messages)
         return str(response.content)
-
 
     @chain
     async def summarize_cheatsheet(page_text: str) -> str:
@@ -99,7 +98,7 @@ Additional instructions:
         
         status["status"] = "summarizing"
 
-        response = await _invoke_with_retries(cheap_model, messages)
+        response = await _invoke_with_retries(smart_model, messages)
 
         content = response.content
         if not isinstance(content, str):
@@ -116,9 +115,8 @@ Additional instructions:
 
         return "" if empty_signal in content else content
 
-
     main_chain = format_math | summarize_cheatsheet
-    
+
     result = await main_chain.ainvoke(page_text)
     
     status["status"] = "done"
