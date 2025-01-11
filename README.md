@@ -1,5 +1,7 @@
 # Cheatsheet creator project
-This is a fairly simple cheatsheet creator which can parse the most important information from a (long) lecture handout using an LLM. The generated markdown has LaTeX formulas embedded in `$`s (compatible with the vscode viewer)
+This is a fairly simple cheatsheet creator which can parse the most important information from a (long) lecture handout using an LLM. The generated markdown has LaTeX formulas embedded in `$`s (compatible with the vscode markdown viewer)
+
+View the app at https://ai-cheatsheets.streamlit.app/
 
 The processing is done asynchronously using batches of pages (the batch size can be configured through `main.py`). This slightly favors execution speed over quality, since the llm is not passed context what was on the previous batch of pages.   
 
