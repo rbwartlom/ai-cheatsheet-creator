@@ -20,27 +20,30 @@ class Prompts(TypedDict):
     summarizer_prompt: str
 
 
-# Load openai api key
+# Load openai api key, if set
 load_dotenv()
-if os.getenv("OPENAI_API_KEY") is None:
-    raise Exception("The openai api key was not provided!")
-cheap_model = ChatOpenAI(model="gpt-4o-mini")
-smart_model = ChatOpenAI(model="gpt-4o")
+CHEAP_MODEL = "gpt-4o-mini"
+SMART_MODEL = "gpt-4o"
 
 
-async def get_suitable_title(from_prompt: str) -> str:
+async def get_suitable_title(from_prompt: str, openai_api_key: str) -> str:
     messages = [
         SystemMessage(
             "The user will provide a prompt, in which they are looking to create some sort of document. Please output a suitable title for this document. You reply with only the title"),
         HumanMessage(from_prompt)
     ]
 
-    response = await smart_model.ainvoke(messages)
+    model = ChatOpenAI(model=SMART_MODEL, api_key=openai_api_key)
+
+    response = await model.ainvoke(messages)
     return response.content
 
 
-async def process_block(page_text: list[str], status: Status, prompts_json: Prompts):
+async def process_block(page_text: list[str], status: Status, prompts_json: Prompts, openai_api_key: str) -> str:
     status["status"] = "1. invoking"
+
+    smart_model = ChatOpenAI(model=SMART_MODEL, api_key=openai_api_key)
+    cheap_model = ChatOpenAI(model=CHEAP_MODEL, api_key=openai_api_key)
 
     async def _invoke_with_retries(model, messages, max_retries=5, delay=90):
         retries = 0
@@ -119,25 +122,29 @@ Additional instructions:
     return result
 
 
-async def process_blocks(prompts_json: Prompts, pages: list[str], batch_size: int) \
+async def process_blocks(prompts_json: Prompts, pages: list[str], batch_size: int, openai_api_key: str | None = None) \
         -> tuple[str, list[tuple[asyncio.Task, Status]]]:
     """
     Processes pages in batches and returns the title and promises for the processed blocks.
     :param prompts_json: A dictionary containing the prompts for the page extraction and summarizer models
     :param pages: A list of strings, each string representing the text of a page
     :param batch_size: The size of the batches to process the pages in (batch_size pages are processed at one time)
+    :param openai_api_key: The OpenAI API key to use for invoking the models. If not provided, the env must be set.
     :return: A tuple containing the title and a list of promise, status tuples (one for each block)
     """
-    
+
+    if openai_api_key is None or openai_api_key == "":
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+
     batch_size = max(1, batch_size)
     promises = []
-    title_promise = asyncio.create_task(get_suitable_title(prompts_json["summarizer_prompt"]))
+    title_promise = asyncio.create_task(get_suitable_title(prompts_json["summarizer_prompt"], openai_api_key))
 
     # Process in batches of size `batch_size`
     for i in range(0, len(pages), batch_size):
         batch = pages[i:i + batch_size]
         status_dict = {"status": "invoking"}
-        promises.append((asyncio.create_task(process_block(batch, status_dict, prompts_json)), status_dict))
+        promises.append((asyncio.create_task(process_block(batch, status_dict, prompts_json, openai_api_key)), status_dict))
 
     title = await title_promise
 

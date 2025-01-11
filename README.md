@@ -5,9 +5,11 @@ The processing is done asynchronously using batches of pages (the batch size can
 
 
 ## Setup
+Ensure you have python 3.12 installed.
+
 cd into the root directory, then
 ```bash
-touch prompts.json .env # create config files
+touch prompts.json .env # create config files. This is only relevant if you want to use the cli.
 ```
 ```bash
 python3 -m venv .venv # set up venv
@@ -21,7 +23,8 @@ pip install -r requirements.txt # install requirements
 Before running the script, please configure the required files:
 
 ### Environment Variables (`.env`)
-- `OPENAI_API_KEY`: The API key from your openai account. ([link](https://platform.openai.com/api-keys))
+- `OPENAI_API_KEY`: The API key from your openai account. ([link](https://platform.openai.com/api-keys)). 
+For the streamlit frontend, this is not mandatory to set.
 
 ### Prompt setup (`prompts.json`)
 Fill out the  created `prompts.json` file as desired. 
@@ -31,11 +34,15 @@ To write good prompts, note the context in which they are used:
 - `page_extraction_prompt`: This prompt is used to format the pdf's text layer into a pretty text using a smaller model
 - `summarizer_prompt`: This prompt then summarizes the content of the formatted page
 
-### Input & Output files
-By default, the input file is `file.pdf`, and the result is outputted into `results/file.md`.
-If you wish to change this, you can adjust the top 2 lines from main.py
 
 ### Running the program
+You can choose between two interfaces:
+1. Use the CLI (provides nicer status updates, persists your prompts)
 ```bash
-python3 ./cli.py
+python3 ./cli.py --help
+```
+
+2. Use the streamlit frontend (is more user-friendly)
+```bash
+streamlit run ./streamlit_app.py
 ```
