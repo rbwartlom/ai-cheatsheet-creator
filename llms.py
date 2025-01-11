@@ -5,15 +5,19 @@ from dotenv import load_dotenv
 import re
 from typing import TypedDict
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.runnables import chain
 from langchain_openai import ChatOpenAI
 from openai import RateLimitError
-import json
 
 
 class Status(TypedDict):
     status: str
+
+
+class Prompts(TypedDict):
+    page_extraction_prompt: str
+    summarizer_prompt: str
 
 
 # Load openai api key
@@ -21,34 +25,23 @@ load_dotenv()
 if os.getenv("OPENAI_API_KEY") is None:
     raise Exception("The openai api key was not provided!")
 cheap_model = ChatOpenAI(model="gpt-4o-mini")
-smart_model = ChatOpenAI(model="gpt-4o-mini")
+smart_model = ChatOpenAI(model="gpt-4o")
 
 
-def load_prompts_json():
-    prompts_json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "./prompts.json")
-
-    if not os.path.exists(prompts_json_path):
-        raise Exception("Please add a prompts.json file in the root folder")
-
-    with open(prompts_json_path, "r") as p_json:
-        return json.load(p_json)
-
-
-prompts_json = load_prompts_json()
-
-async def get_suitable_title() -> str:
+async def get_suitable_title(from_prompt: str) -> str:
     messages = [
-        SystemMessage("The user will provide a prompt, in which they are looking to create some sort of document. Please output a suitable title for this document. You reply with only the title"),
-        HumanMessage(prompts_json["summarizer_prompt"])
+        SystemMessage(
+            "The user will provide a prompt, in which they are looking to create some sort of document. Please output a suitable title for this document. You reply with only the title"),
+        HumanMessage(from_prompt)
     ]
 
     response = await smart_model.ainvoke(messages)
     return response.content
 
 
-async def process_pages(page_text: list[str], status: Status):
-    status["status"] = "invoking"
-    
+async def process_block(page_text: list[str], status: Status, prompts_json: Prompts):
+    status["status"] = "1. invoking"
+
     async def _invoke_with_retries(model, messages, max_retries=5, delay=90):
         retries = 0
         while retries < max_retries:
@@ -59,7 +52,8 @@ async def process_pages(page_text: list[str], status: Status):
                 retries += 1
                 if retries < max_retries:
                     print(f"RateLimitError: Retrying in {delay / 60} minutes... ({retries}/{max_retries})")
-                    status["status"] = f"{status.get('status', '')} RateLimitError: Retrying in {delay / 60} minutes... ({retries}/{max_retries})"
+                    status[
+                        "status"] = f"{status.get('status', '')} RateLimitError: Retrying in {delay / 60} minutes... ({retries}/{max_retries})"
                     await asyncio.sleep(delay)
                 else:
                     raise Exception("Max retries reached. Please try again later.")
@@ -74,8 +68,8 @@ async def process_pages(page_text: list[str], status: Status):
             SystemMessage(prompts_json["page_extraction_prompt"]),
             HumanMessage(final_text)
         ]
-        
-        status["status"] = "formatting"
+
+        status["status"] = "2. reading pages"
 
         response = await _invoke_with_retries(cheap_model, messages)
         return str(response.content)
@@ -95,8 +89,8 @@ Additional instructions:
             SystemMessage(additional_prompt),
             HumanMessage(page_text)
         ]
-        
-        status["status"] = "summarizing"
+
+        status["status"] = "3. generating"
 
         response = await _invoke_with_retries(smart_model, messages)
 
@@ -111,15 +105,41 @@ Additional instructions:
         content = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', content, flags=re.DOTALL)
 
         if content.startswith("```markdown"):
-            content = content.replace("```markdown", "").replace("```", "").strip()
+            content = content.replace("```markdown", "").strip()
+            if content.endswith("```"):
+                content = content[:-3].strip()
 
         return "" if empty_signal in content else content
 
     main_chain = format_math | summarize_cheatsheet
 
     result = await main_chain.ainvoke(page_text)
-    
-    status["status"] = "done"
+
+    status["status"] = "4. done"
     return result
 
+
+async def process_blocks(prompts_json: Prompts, pages: list[str], batch_size: int) \
+        -> tuple[str, list[tuple[asyncio.Task, Status]]]:
+    """
+    Processes pages in batches and returns the title and promises for the processed blocks.
+    :param prompts_json: A dictionary containing the prompts for the page extraction and summarizer models
+    :param pages: A list of strings, each string representing the text of a page
+    :param batch_size: The size of the batches to process the pages in (batch_size pages are processed at one time)
+    :return: A tuple containing the title and a list of promise, status tuples (one for each block)
+    """
+    
+    batch_size = max(1, batch_size)
+    promises = []
+    title_promise = asyncio.create_task(get_suitable_title(prompts_json["summarizer_prompt"]))
+
+    # Process in batches of size `batch_size`
+    for i in range(0, len(pages), batch_size):
+        batch = pages[i:i + batch_size]
+        status_dict = {"status": "invoking"}
+        promises.append((asyncio.create_task(process_block(batch, status_dict, prompts_json)), status_dict))
+
+    title = await title_promise
+
+    return title, promises
 

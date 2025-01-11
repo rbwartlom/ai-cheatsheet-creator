@@ -37,5 +37,5 @@ If you wish to change this, you can adjust the top 2 lines from main.py
 
 ### Running the program
 ```bash
-python3 ./main.py
+python3 ./cli.py
 ```
