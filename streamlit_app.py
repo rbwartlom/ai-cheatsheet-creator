@@ -59,6 +59,29 @@ async def process_pdf_to_md(
     return joined_md
 
 
+def md_view(md: str):
+    c1, c2 = st.columns([8, 2])
+
+    with c1:
+        st.subheader("Final Markdown Output")
+
+    with c2:
+        # Provide a download button
+        st.download_button(
+            label="Download",
+            data=md,
+            file_name="result.md",
+            mime="text/markdown"
+        )
+
+    view = st.selectbox("Select view type", ["Preview", "Code"])
+
+    if view == "Preview":
+        st.markdown(md)
+    else:
+        st.code(md, language="markdown")
+
+
 def main():
     st.title("PDF to Markdown Summarizer")
 
@@ -78,9 +101,9 @@ def main():
         st.text(
             "Explanation: The app first uses the extraction prompt to format the pages nicely, also parsing mathematical formulas. It then uses the summarizer prompt to summarize the content.")
 
-    uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
+    uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"], on_change=lambda: st.session_state.pop("final_md", None))
     batch_size = st.number_input(
-        "Batch size (number of pages to process at once)", min_value=1, value=15
+        "Batch size (number of pages to process per block)", min_value=1, value=15
     )
 
     if uploaded_file is not None:
@@ -109,23 +132,15 @@ def main():
                             openai_api_key=openai_api_key
                         )
                     )
+                    st.session_state["final_md"] = final_md
                 except Exception as e:
                     st.error(f"Error processing your PDF: {e}")
                     return
 
-            st.success("Markdown generation complete!")
+                st.success("Markdown generation complete!")
 
-            # Show the final markdown in a code cell for easy copy
-            st.subheader("Final Markdown Output")
-            st.code(final_md, language="markdown")
-
-            # Provide a download button
-            st.download_button(
-                label="Download Markdown",
-                data=final_md,
-                file_name="result.md",
-                mime="text/markdown"
-            )
+        if "final_md" in st.session_state:
+            md_view(st.session_state["final_md"])
 
 
 if __name__ == "__main__":
