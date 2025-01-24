@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 
 import streamlit as st
 import asyncio
@@ -41,9 +42,11 @@ async def process_pdf_to_md(
         "summarizer_prompt": summarizer_prompt
     }
 
+    pages: tuple[list[str], Literal["text"]] = (pdf_pages, "text")
+
     title, promises = await process_blocks(
         prompts_json=prompts_json,
-        pages=pdf_pages,
+        pages=pages,
         batch_size=batch_size,
         openai_api_key=openai_api_key
     )

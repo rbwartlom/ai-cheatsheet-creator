@@ -3,7 +3,7 @@ import os
 
 from dotenv import load_dotenv
 import re
-from typing import TypedDict
+from typing import TypedDict, List, Literal, Tuple
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.runnables import chain
@@ -20,6 +20,8 @@ class Prompts(TypedDict):
     summarizer_prompt: str
 
 
+Pages = Tuple[List[str], Literal["text", "base64_jpeg"]]
+
 # Load openai api key, if set
 load_dotenv()
 CHEAP_MODEL = "gpt-4o-mini"
@@ -29,7 +31,8 @@ SMART_MODEL = "gpt-4o"
 async def get_suitable_title(from_prompt: str, openai_api_key: str) -> str:
     messages = [
         SystemMessage(
-            "The user will provide a prompt, in which they are looking to create some sort of document. Please output a suitable title for this document. You reply with only the title"),
+            "The user will provide a prompt, in which they are looking to create some sort of document. "
+            "Please output a suitable title for this document. You reply with only the title"),
         HumanMessage(from_prompt)
     ]
 
@@ -39,7 +42,7 @@ async def get_suitable_title(from_prompt: str, openai_api_key: str) -> str:
     return response.content
 
 
-async def process_block(page_text: list[str], status: Status, prompts_json: Prompts, openai_api_key: str) -> str:
+async def process_block(pages: Pages, status: Status, prompts_json: Prompts, openai_api_key: str) -> str:
     status["status"] = "1. invoking"
 
     smart_model = ChatOpenAI(model=SMART_MODEL, api_key=openai_api_key)
@@ -51,21 +54,48 @@ async def process_block(page_text: list[str], status: Status, prompts_json: Prom
             try:
                 response = await model.ainvoke(messages)
                 return response
-            except RateLimitError:
+            except Exception as e:
                 retries += 1
                 if retries < max_retries:
-                    print(f"RateLimitError: Retrying in {delay / 60} minutes... ({retries}/{max_retries})")
+                    errstr = f"{type(e).__name__}: Retrying in {delay / 60} minutes... ({retries}/{max_retries}) {str(e)}"
                     status[
-                        "status"] = f"{status.get('status', '')} RateLimitError: Retrying in {delay / 60} minutes... ({retries}/{max_retries})"
+                        "status"] = f"{status.get('status', '')} {errstr}" # Append the error message to the status
                     await asyncio.sleep(delay)
                 else:
                     raise Exception("Max retries reached. Please try again later.")
 
     @chain
-    async def format_math(page_texts: list[str]) -> str:
+    async def read_pages_with_vision(pages_base64: list[str]) -> list[str]:
+
+        messages = [
+            SystemMessage("Read out the given pages into Markdown. If there are images, describe them. "
+                          "If there are tables/graphs etc., then put them into the markdown nicely."
+                          "Format your output like so `Page n + <i> \\n<page content>\\n---\\n`, where i elemof [0, 1, 2, ...] "
+                          "You reply with only the markdown."),
+            SystemMessage(f"Additional instructions: ```{prompts_json['page_extraction_prompt']}```"),
+            HumanMessage(
+                content=[
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{page_base64}",
+                            "detail": "low"
+                        },
+                    } for page_base64 in pages_base64
+                ]
+            )
+        ]
+
+        status["status"] = "2. reading pages (vision)"
+
+        response = await _invoke_with_retries(cheap_model, messages)
+        return response.content
+
+    @chain
+    async def format_pages(page_texts: list[str]) -> str:
         # Concatenate with Page n, Page n + 1
         concatenated_pages = [f"Page {f'n + {i}' if i > 0 else 'n'}: {text}" for i, text in enumerate(page_texts)]
-        final_text = "\n\n".join(concatenated_pages)
+        final_text = "\n---\n".join(concatenated_pages)
 
         messages = [
             SystemMessage(prompts_json["page_extraction_prompt"]),
@@ -114,15 +144,22 @@ Additional instructions:
 
         return "" if empty_signal in content else content
 
-    main_chain = format_math | summarize_cheatsheet
+    page_strs, page_type = pages
 
-    result = await main_chain.ainvoke(page_text)
+    if page_type == "text":
+        main_chain = format_pages | summarize_cheatsheet
+    elif page_type == "base64_jpeg":
+        main_chain = read_pages_with_vision | summarize_cheatsheet
+    else:
+        raise ValueError("Invalid page type")
+
+    result = await main_chain.ainvoke(page_strs)
 
     status["status"] = "4. done"
     return result
 
 
-async def process_blocks(prompts_json: Prompts, pages: list[str], batch_size: int, openai_api_key: str | None = None) \
+async def process_blocks(prompts_json: Prompts, pages: Pages, batch_size: int, openai_api_key: str | None = None) \
         -> tuple[str, list[tuple[asyncio.Task, Status]]]:
     """
     Processes pages in batches and returns the title and promises for the processed blocks.
@@ -132,6 +169,7 @@ async def process_blocks(prompts_json: Prompts, pages: list[str], batch_size: in
     :param openai_api_key: The OpenAI API key to use for invoking the models. If not provided, the env must be set.
     :return: A tuple containing the title and a list of promise, status tuples (one for each block)
     """
+    page_content, page_type = pages
 
     if openai_api_key is None or openai_api_key == "":
         openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -141,12 +179,13 @@ async def process_blocks(prompts_json: Prompts, pages: list[str], batch_size: in
     title_promise = asyncio.create_task(get_suitable_title(prompts_json["summarizer_prompt"], openai_api_key))
 
     # Process in batches of size `batch_size`
-    for i in range(0, len(pages), batch_size):
-        batch = pages[i:i + batch_size]
+    for i in range(0, len(page_content), batch_size):
+        batch = page_content[i:i + batch_size]
         status_dict = {"status": "invoking"}
-        promises.append((asyncio.create_task(process_block(batch, status_dict, prompts_json, openai_api_key)), status_dict))
+        promises.append(
+            (asyncio.create_task(process_block((batch, page_type), status_dict, prompts_json, openai_api_key)),
+             status_dict))
 
     title = await title_promise
 
     return title, promises
-
